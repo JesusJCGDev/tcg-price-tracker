@@ -31,7 +31,8 @@ public class CardPriceScheduler {
         } else {
             for (String setId : monitoredSets) {
                 try {
-                    ingestionService.ingestSet(setId);
+                    int cardsIngested = ingestionService.ingestSet(setId);
+                    log.info("Set {} sincronizado con éxito. Registros procesados: {}", setId, cardsIngested);
                 } catch (Exception e) {
                     log.error("Error al sincronizar el set {}: {}", setId, e.getMessage());
                 }

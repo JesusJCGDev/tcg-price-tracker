@@ -1,6 +1,8 @@
 package com.tcg.tracker.infrastructure.client.config;
 
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpRequest;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.client.ClientHttpRequestExecution;
@@ -10,6 +12,7 @@ import org.springframework.http.client.ClientHttpResponse;
 import java.io.IOException;
 
 @Slf4j
+@NullMarked
 public class HttpRetryInterceptor implements ClientHttpRequestInterceptor {
 
     private final int maxAttempts;
@@ -47,7 +50,7 @@ public class HttpRetryInterceptor implements ClientHttpRequestInterceptor {
         }
     }
 
-    private void applyBackoff(int attempt, ClientHttpResponse response) {
+    private void applyBackoff(int attempt, @Nullable ClientHttpResponse response) {
         long waitTime = backoffInitialMs * (long) Math.pow(2, attempt - 1);
 
         if (response != null) {

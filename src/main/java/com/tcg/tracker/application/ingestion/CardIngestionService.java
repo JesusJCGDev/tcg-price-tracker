@@ -18,6 +18,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 @Slf4j
 @Service
@@ -110,8 +111,8 @@ public class CardIngestionService {
         }
 
         return prices.values().stream()
-                .filter(p -> p.market() != null)
                 .map(PriceDetailDto::market)
+                .filter(Objects::nonNull)
                 .findFirst()
                 .orElse(null);
     }
@@ -130,11 +131,13 @@ public class CardIngestionService {
 
         log.info("Se encontraron {} sets en total para sincronizar.", setIds.size());
 
+        int grandTotal = 0;
         int current = 1;
         for (String setId : setIds) {
             try {
                 log.info("[{}/{}] Sincronizando set: {}", current, setIds.size(), setId);
-                ingestSet(setId);
+                int ingested = ingestSet(setId);
+                grandTotal += ingested;
                 // Pausa preventiva entre sets completos
                 Thread.sleep(1500);
             } catch (Exception e) {
@@ -143,6 +146,6 @@ public class CardIngestionService {
             current++;
         }
 
-        log.info("Sincronización global de todos los sets completada.");
+        log.info("Sincronización global de todos los sets completada. Total acumulado: {} cartas.", grandTotal);
     }
 }
