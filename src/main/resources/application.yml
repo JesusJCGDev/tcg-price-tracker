@@ -1,0 +1,40 @@
+spring:
+  application:
+    name: tcg-price-tracker
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/tcg_tracker
+    username: postgres
+    password: postgres_password
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+# Configuración personalizada del proyecto
+tcg:
+  api:
+    pokemon:
+      base-url: https://api.pokemontcg.io/v2
+      api-key: ${POKEMON_TCG_API_KEY:}
+  tracker:
+    # Ejecuta a las 03:00 AM todos los días (segundo, minuto, hora, día mes, mes, día semana)
+    cron: "0 0 3 * * *"
+    # Flag para sincronizar el catálogo entero de la API
+    all-sets: true
+    # Sets iniciales para monitorizar (sv3: Obsidian Flames, sv3pt5: 151)
+    monitored-sets:
+      - sv3
+      - sv3pt5
+
