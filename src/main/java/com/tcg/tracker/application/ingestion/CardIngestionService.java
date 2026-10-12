@@ -7,12 +7,9 @@ import com.tcg.tracker.infrastructure.client.dto.PokemonSetDto;
 import com.tcg.tracker.infrastructure.client.dto.PriceDetailDto;
 import com.tcg.tracker.infrastructure.persistence.entity.CardEntity;
 import com.tcg.tracker.infrastructure.persistence.entity.PriceSnapshotEntity;
-import com.tcg.tracker.infrastructure.persistence.repository.CardJpaRepository;
-import com.tcg.tracker.infrastructure.persistence.repository.PriceSnapshotJpaRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -26,16 +23,14 @@ import java.util.Objects;
 public class CardIngestionService {
 
     private final PokemonTcgApiClient apiClient;
-    private final CardJpaRepository cardRepository;
-    private final PriceSnapshotJpaRepository priceSnapshotRepository;
+    private final CardSetPersistenceService setPersistenceService;
 
-    @Transactional
     public int ingestSet(String setId) {
         log.info("Iniciando ingesta de cartas para el set: {}", setId);
         int page = 1;
         int pageSize = 50;
-        int totalIngested = 0;
         boolean hasMore = true;
+        List<PokemonCardDto> fetchedCards = new ArrayList<>();
 
         while (hasMore) {
             PokemonCardResponse response = apiClient.fetchCardsBySet(setId, page, pageSize);
@@ -44,46 +39,14 @@ public class CardIngestionService {
                 break;
             }
 
-            List<CardEntity> cardsToSave = new ArrayList<>();
-            List<PriceSnapshotEntity> snapshotsToSave = new ArrayList<>();
-            Instant now = Instant.now();
+            fetchedCards.addAll(response.data());
+            log.info("Descargadas {} cartas del set {} (Página {})", fetchedCards.size(), setId, page);
 
-            for (PokemonCardDto dto : response.data()) {
-                CardEntity cardEntity = CardEntity.builder()
-                        .id(dto.id())
-                        .name(dto.name())
-                        .setName(dto.set() != null ? dto.set().name() : setId)
-                        .rarity(dto.rarity())
-                        .imageUrl(dto.images() != null ? dto.images().large() : null)
-                        .createdAt(now)
-                        .build();
-
-                cardsToSave.add(cardEntity);
-
-                BigDecimal marketPrice = extractMarketPrice(dto);
-                if (marketPrice != null) {
-                    PriceSnapshotEntity snapshot = PriceSnapshotEntity.builder()
-                            .card(cardEntity)
-                            .marketplace("TCGPLAYER")
-                            .price(marketPrice)
-                            .recordedAt(now)
-                            .build();
-                    snapshotsToSave.add(snapshot);
-                }
-            }
-
-            cardRepository.saveAll(cardsToSave);
-            priceSnapshotRepository.saveAll(snapshotsToSave);
-
-            totalIngested += cardsToSave.size();
-            log.info("Procesadas {} cartas (Página {})", totalIngested, page);
-
-            if (totalIngested >= response.totalCount() || response.data().size() < pageSize) {
+            if (fetchedCards.size() >= response.totalCount() || response.data().size() < pageSize) {
                 hasMore = false;
             } else {
                 page++;
                 try {
-                    // Pausa de 1.5s para no disparar el limitador de ráfaga sin API Key
                     Thread.sleep(1500);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -92,8 +55,44 @@ public class CardIngestionService {
             }
         }
 
-        log.info("Ingesta finalizada para el set {}. Total cartas registradas: {}", setId, totalIngested);
-        return totalIngested;
+        if (fetchedCards.isEmpty()) {
+            log.warn("No se encontraron cartas para el set: {}", setId);
+            return 0;
+        }
+
+        Instant now = Instant.now();
+        List<CardEntity> cardsToSave = new ArrayList<>(fetchedCards.size());
+        List<PriceSnapshotEntity> snapshotsToSave = new ArrayList<>(fetchedCards.size());
+
+        for (PokemonCardDto dto : fetchedCards) {
+            CardEntity cardEntity = CardEntity.builder()
+                    .id(dto.id())
+                    .name(dto.name())
+                    .setName(dto.set() != null ? dto.set().name() : setId)
+                    .rarity(dto.rarity())
+                    .imageUrl(dto.images() != null ? dto.images().large() : null)
+                    .createdAt(now)
+                    .isNew(true)
+                    .build();
+
+            cardsToSave.add(cardEntity);
+
+            BigDecimal marketPrice = extractMarketPrice(dto);
+            if (marketPrice != null) {
+                PriceSnapshotEntity snapshot = PriceSnapshotEntity.builder()
+                        .card(cardEntity)
+                        .marketplace("TCGPLAYER")
+                        .price(marketPrice)
+                        .recordedAt(now)
+                        .build();
+                snapshotsToSave.add(snapshot);
+            }
+        }
+
+        setPersistenceService.saveSetData(cardsToSave, snapshotsToSave);
+
+        log.info("Ingesta finalizada para el set {}. Total cartas registradas: {}", setId, cardsToSave.size());
+        return cardsToSave.size();
     }
 
     private BigDecimal extractMarketPrice(PokemonCardDto dto) {
@@ -138,7 +137,6 @@ public class CardIngestionService {
                 log.info("[{}/{}] Sincronizando set: {}", current, setIds.size(), setId);
                 int ingested = ingestSet(setId);
                 grandTotal += ingested;
-                // Pausa preventiva entre sets completos
                 Thread.sleep(1500);
             } catch (Exception e) {
                 log.error("Error al procesar el set {}: {}", setId, e.getMessage());
